@@ -1,0 +1,64 @@
+version: '3.8'
+
+# ─────────────────────────────────────────────────────────────────────────────
+# OpenTelemetry Demo Stack
+# Services: Jaeger (tracing UI) + Prometheus (metrics) + Grafana (dashboards)
+#
+# Start everything: docker compose up -d
+# Stop everything:  docker compose down
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  # ── Jaeger: All-in-one trace collector + UI ─────────────────────────────────
+  jaeger:
+    image: jaegertracing/all-in-one:1.55
+    container_name: otel-jaeger
+    ports:
+      - "16686:16686"   # Jaeger UI   → open http://localhost:16686
+      - "4317:4317"     # OTLP gRPC   (alternative transport)
+      - "4318:4318"     # OTLP HTTP   ← our Node.js app sends traces here
+      - "9411:9411"     # Zipkin compat (optional)
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+      - LOG_LEVEL=warn
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:16686"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Prometheus: Metrics scraper & storage ───────────────────────────────────
+  prometheus:
+    image: prom/prometheus:v2.50.0
+    container_name: otel-prometheus
+    ports:
+      - "9090:9090"     # Prometheus UI → http://localhost:9090
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.enable-lifecycle'
+    depends_on:
+      - jaeger
+
+  # ── Grafana: Dashboards for metrics & traces ────────────────────────────────
+  grafana:
+    image: grafana/grafana:10.3.0
+    container_name: otel-grafana
+    ports:
+      - "3001:3000"     # Grafana UI  → http://localhost:3001 (login: admin/admin)
+    environment:
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+      - GF_AUTH_DISABLE_LOGIN_FORM=true
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana-datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
+    depends_on:
+      - prometheus
+      - jaeger
+
+volumes:
+  grafana-data:
